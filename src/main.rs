@@ -7,7 +7,7 @@ use serde::Deserialize;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Info)
+        .with_level(log::LevelFilter::Trace)
         .init()
         .unwrap();
 
@@ -33,7 +33,6 @@ struct BolBasketState {
 
 pub async fn scrape(product_url: &str) {
     let product_info = get_product_info(product_url).await;
-    println!("{:?}", product_info);
     
     let cookie_store = reqwest_cookie_store::CookieStore::default();
     let cookie_store = reqwest_cookie_store::CookieStoreMutex::new(cookie_store);
@@ -78,7 +77,7 @@ pub async fn scrape(product_url: &str) {
 }
 
 async fn add_to_basket(client: &Client, product_info: &ProductInfo) {
-    client
+    let request = client
         .get("https://www.bol.com/nl/order/basket/addItems.html")
         .query(&[
             ("productId", &product_info.product_id),
@@ -86,9 +85,12 @@ async fn add_to_basket(client: &Client, product_info: &ProductInfo) {
             ("quantity", &"1".to_string()),
         ])
         .header(ACCEPT, "text/html")
-        .send()
-        .await
+        .build()
         .unwrap();
+
+    println!("{}", request.url());
+
+    client.execute(request).await.unwrap();
 }
 
 #[derive(Debug)]
@@ -137,7 +139,6 @@ async fn get_basket_state(
 ) -> Option<ItemRow> {
     let state_reponse = client
         .get("https://www.bol.com/nl/rnwy/basket/state")
-        .header(ACCEPT, "*/*")
         .header("X-XSRF-TOKEN", xsrf_token)
         .send()
         .await
