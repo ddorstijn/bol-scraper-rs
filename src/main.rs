@@ -1,5 +1,5 @@
 use reqwest::{
-    header::{HeaderMap, ACCEPT},
+    header::{HeaderMap, CONTENT_TYPE, ACCEPT},
     Client,
 };
 use serde::Deserialize;
@@ -7,12 +7,13 @@ use serde::Deserialize;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Trace)
+        .with_level(log::LevelFilter::Off)
         .init()
         .unwrap();
 
     let product_url = "https://www.bol.com/nl/nl/p/antraciet-tapijt-wasbaar-laagpolig-vloerkleed-met-anti-slip-koho-soft-comfort-wasbaar-op-30-160x230cm-modern-woonkamer-salon-slaapkamer-eetkamer/9300000129253393/";
-    scrape(product_url).await;
+    let quantity = scrape(product_url).await;
+    println!("Quantity: {}", quantity);
 
     return Ok(());
 }
@@ -31,7 +32,7 @@ struct BolBasketState {
     pub item_rows: Vec<ItemRow>,
 }
 
-pub async fn scrape(product_url: &str) {
+pub async fn scrape(product_url: &str) -> i32 {
     let product_info = get_product_info(product_url).await;
     
     let cookie_store = reqwest_cookie_store::CookieStore::default();
@@ -53,7 +54,17 @@ pub async fn scrape(product_url: &str) {
         .build()
         .unwrap();
 
-    add_to_basket(&client, &product_info).await;
+    client
+        .get("https://www.bol.com/nl/order/basket/addItems.html")
+        .query(&[
+            ("productId", &product_info.product_id),
+            ("offerId", &product_info.offer_id),
+            ("quantity", &"1".to_string()),
+        ])
+        .send()
+        .await
+        .unwrap();
+
     // Get Token
     let xsrf_token = {
         let store = cookie_store.lock().unwrap();
@@ -73,24 +84,9 @@ pub async fn scrape(product_url: &str) {
     let row = get_basket_state(&client, &product_info, &xsrf_token)
         .await
         .unwrap();
-    println!("{}", row.quantity);
-}
-
-async fn add_to_basket(client: &Client, product_info: &ProductInfo) {
-    let request = client
-        .get("https://www.bol.com/nl/order/basket/addItems.html")
-        .query(&[
-            ("productId", &product_info.product_id),
-            ("offerId", &product_info.offer_id),
-            ("quantity", &"1".to_string()),
-        ])
-        .header(ACCEPT, "text/html")
-        .build()
-        .unwrap();
-
-    println!("{}", request.url());
-
-    client.execute(request).await.unwrap();
+   
+   
+   row.quantity
 }
 
 #[derive(Debug)]
@@ -153,17 +149,12 @@ async fn get_basket_state(
 
 async fn change_product_quantity(client: &Client, id: String, xsrf_token: &String) {
     let patch_url = format!("https://www.bol.com/nl/rnwy/basket/v1/items/{}", id);
-    let mut patch_headers = HeaderMap::new();
-    patch_headers.insert("Accept", "*/*".parse().unwrap());
-    patch_headers.insert("X-XSRF-TOKEN", xsrf_token.parse().unwrap());
-    patch_headers.insert(
-        "Content-Type",
-        "application/json;charset=utf-8".parse().unwrap(),
-    );
 
     client
         .patch(patch_url)
-        .headers(patch_headers)
+        .header("X-XSRF-TOKEN", xsrf_token)
+        .header(CONTENT_TYPE, "application/json;charset=utf-8")
+        .header(ACCEPT, "*/*")
         .body("{\"quantity\":500}")
         .send()
         .await
